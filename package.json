@@ -3,20 +3,23 @@
   "version": "1.0.0",
   "description": "A mini web server built from scratch",
   "main": "index.js",
-  "type": "module",
   "scripts": {
     "build": "tsc",
-    "lint": "eslint src",
-    "start": "npm run build && node build/index.js",
-    "test": "jest"
+    "test": "jest",
+    "start": "npm run build && node dist/index.js",
+    "format": "prettier src --write",
+    "lint": "eslint src --fix"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.12.4",
     "eslint": "^8.57.0",
+    "jest": "^29.7.0",
     "prettier": "^3.2.5",
+    "ts-jest": "^29.1.2",
     "typescript": "^5.4.4",
     "typescript-eslint": "^7.5.0"
   }
