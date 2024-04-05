@@ -1,0 +1,23 @@
+{
+  "name": "mini-web-server",
+  "version": "1.0.0",
+  "description": "A mini web server built from scratch",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src",
+    "start": "npm run build && node build/index.js",
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.12.4",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.4",
+    "typescript-eslint": "^7.5.0"
+  }
+}
