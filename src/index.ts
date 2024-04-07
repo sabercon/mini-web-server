@@ -1,4 +1,4 @@
-import echoServer from "./echo-server"
+import startEchoServer from "./async-echo-server"
 
 console.log("Hello world!")
-echoServer({ host: "127.0.0.1", port: 1234 })
+startEchoServer({ host: "127.0.0.1", port: 1234 })

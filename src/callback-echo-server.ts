@@ -3,7 +3,7 @@ import * as net from "net"
 /**
  * Starts a TCP server that reads data from clients and writes the same data back
  */
-export default function echoServer(options: net.ListenOptions) {
+export default function startEchoServer(options: net.ListenOptions) {
   const server = net.createServer()
   server.on("error", handleError)
   server.on("connection", handleConnection)
