@@ -23,15 +23,12 @@ function handleConnection(socket: net.Socket) {
     console.log("EOF")
   })
 
-  socket.on("data", (data: Buffer) => {
+  socket.on("data", (data) => {
     console.log("data:", data.toString())
-    // echoes back the data
     socket.write(data)
 
-    // actively closes the connection if the data contains 'q'
     if (data.includes("q")) {
       console.log("closing")
-      // this will send FIN and close the connection
       socket.end()
     }
   })
