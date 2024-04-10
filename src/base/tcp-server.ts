@@ -18,7 +18,7 @@ async function handleConnection(
   console.log("new connection:", socket.remoteAddress, socket.remotePort)
 
   try {
-    const conn: TCPConnection = new TCPConnection(socket)
+    const conn = new TCPConnection(socket)
     await connHandler(conn)
   } catch (err) {
     console.error(err)

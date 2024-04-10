@@ -1,78 +1,75 @@
 import * as net from "net"
 
 export default class TCPConnection {
-  static readonly EOF = Buffer.from("")
-
-  readonly #socket: net.Socket
   // from the 'error' event
-  #err?: Error
-  // EOF, from the 'end' event
-  #ended: boolean
+  private err?: Error
+  // from the 'end' event
+  private ended: boolean
   // the callbacks of the promise of the current read
-  #reader: null | {
-    resolve: (value: Buffer) => void
+  private reader: null | {
+    resolve: (value: Buffer | "END") => void
     reject: (error: Error) => void
   }
 
-  constructor(socket: net.Socket) {
-    this.#socket = socket
-    this.#ended = false
-    this.#reader = null
-    socket.on("data", this.#onData.bind(this))
-    socket.on("end", this.#onEnd.bind(this))
-    socket.on("error", this.#onError.bind(this))
+  constructor(private readonly socket: net.Socket) {
+    this.ended = false
+    this.reader = null
+    socket.on("data", this.onData.bind(this))
+    socket.on("end", this.onEnd.bind(this))
+    socket.on("error", this.onError.bind(this))
   }
 
-  async read(): Promise<Buffer> {
-    console.assert(!this.#reader) // no concurrent calls
+  async read(): Promise<Buffer | "END"> {
+    // there should be no concurrent calls
+    console.assert(!this.reader)
     return new Promise((resolve, reject) => {
       // if the connection is not readable, completes the promise
-      if (this.#err) {
-        reject(this.#err)
+      if (this.err) {
+        reject(this.err)
         return
       }
-      if (this.#ended) {
-        resolve(TCPConnection.EOF)
+      if (this.ended) {
+        resolve("END")
         return
       }
 
       // saves the promise callbacks
-      this.#reader = { resolve: resolve, reject: reject }
-      // and resumes the 'data' event to fulfill the promise later
-      this.#socket.resume()
+      this.reader = { resolve: resolve, reject: reject }
+      // resumes the 'data' event to fulfill the promise later
+      this.socket.resume()
     })
   }
 
   async write(data: Buffer): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.#socket.write(data, (err) => {
+      this.socket.write(data, (err) => {
         err ? reject(err) : resolve()
       })
     })
   }
 
-  #onData(data: Buffer) {
-    console.assert(this.#reader)
+  private onData(data: Buffer) {
+    console.assert(this.reader)
     // pauses the 'data' event until the next read
-    this.#socket.pause()
+    this.socket.pause()
     // fulfills the promise of the current read
-    this.#reader!.resolve(data)
-    this.#reader = null
+    this.reader!.resolve(data)
+    this.reader = null
   }
 
-  #onEnd() {
-    this.#ended = true
-    if (this.#reader) {
-      this.#reader.resolve(TCPConnection.EOF)
-      this.#reader = null
+  private onEnd() {
+    this.ended = true
+    if (this.reader) {
+      this.reader.resolve("END")
+      this.reader = null
     }
   }
 
-  #onError(err: Error) {
-    this.#err = err
-    if (this.#reader) {
-      this.#reader.reject(err)
-      this.#reader = null
+  private onError(err: Error) {
+    this.err = err
+    if (this.reader) {
+      this.reader.reject(err)
+      this.reader = null
     }
   }
 }

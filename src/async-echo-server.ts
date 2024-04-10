@@ -13,9 +13,9 @@ async function echo(conn: TCPConnection) {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const data = await conn.read()
-    if (data == TCPConnection.EOF) {
+    if (data == "END") {
       console.log("EOF")
-      break
+      return
     }
 
     console.log("data:", data.toString())

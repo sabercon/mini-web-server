@@ -24,7 +24,7 @@ async function echo(conn: TCPConnection) {
 
     if (msg == null) {
       const data = await conn.read()
-      if (data == TCPConnection.EOF) {
+      if (data == "END") {
         console.log("EOF")
         return
       }
@@ -32,21 +32,18 @@ async function echo(conn: TCPConnection) {
       continue
     }
 
-    if (msg.equals(QUIT_MSG)) {
-      await conn.write(BYE_MSG)
+    if (msg == "quit\n") {
+      const reply = Buffer.from("Bye.\n")
+      await conn.write(reply)
       return
     }
 
-    const reply = Buffer.concat([ECHO_MSG, msg])
+    const reply = Buffer.from(`Echo: ${msg}`)
     await conn.write(reply)
   }
 }
 
-function cutMessage(buffer: DynamicBuffer): null | Buffer {
-  const msgEnd = buffer.data().indexOf("\n")
-  return msgEnd < 0 ? null : buffer.pop(msgEnd + 1)
+function cutMessage(buffer: DynamicBuffer): string | null {
+  const msgEnd = buffer.indexOf("\n")
+  return msgEnd < 0 ? null : buffer.popString(msgEnd + 1)
 }
-
-const QUIT_MSG = Buffer.from("quit\n")
-const BYE_MSG = Buffer.from("Bye.\n")
-const ECHO_MSG = Buffer.from("Echo: ")
