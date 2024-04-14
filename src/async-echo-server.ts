@@ -10,13 +10,9 @@ export default function startEchoServer(options: net.ListenOptions) {
 }
 
 async function echo(conn: TCPConnection) {
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  for (;;) {
     const data = await conn.read()
-    if (data == "END") {
-      console.log("EOF")
-      return
-    }
+    if (data == "END") return
 
     console.log("data:", data.toString())
     await conn.write(data)

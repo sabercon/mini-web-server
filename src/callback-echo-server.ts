@@ -20,7 +20,7 @@ function handleConnection(socket: net.Socket) {
 
   socket.on("end", () => {
     // FIN received. The connection will be closed automatically
-    console.log("EOF")
+    console.log("END")
   })
 
   socket.on("data", (data) => {

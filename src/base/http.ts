@@ -20,7 +20,7 @@ export class HTTPHeader {
   ) {}
 
   static parse(line: string): HTTPHeader {
-    const [name, value] = line.split(":", 2)
+    const [name, value] = line.split(":")
     return new HTTPHeader(name.trim(), value.trim())
   }
 
@@ -40,11 +40,11 @@ export function bufferReader(data: Buffer): BodyReader {
   let done = false
   return {
     length: data.length,
-    read: async () => {
-      if (done) return "EOF"
+    read: () => {
+      if (done) return Promise.resolve("EOF")
 
       done = true
-      return data
+      return Promise.resolve(data)
     },
   }
 }
@@ -58,11 +58,28 @@ export class HTTPRequest {
     public readonly bodyReader: BodyReader,
   ) {}
 
-  static async read(conn: TCPConnection): Promise<HTTPRequest | "END"> {
-    const buf = new DynamicBuffer()
+  static async read(
+    conn: TCPConnection,
+    buf: DynamicBuffer,
+  ): Promise<HTTPRequest | "END"> {
+    const lines = await HTTPRequest.cutRequestHeaders(conn, buf)
+    if (lines == "END") return "END"
 
-    let requestHeaders = HTTPRequest.readRequestHeaders(buf)
-    while (requestHeaders == null) {
+    const [requestLine, ...headerLines] = lines.toString().trimEnd().split(CRLF)
+    console.log(requestLine)
+    console.log(headerLines)
+    const [method, uri, version] = requestLine.split(" ").map((s) => s.trim())
+    const headers = headerLines.map((header) => HTTPHeader.parse(header))
+
+    const bodyReader = HTTPRequest.readRequestBody(conn, buf, headers)
+    return new HTTPRequest(method, uri, version, headers, bodyReader)
+  }
+
+  private static async cutRequestHeaders(
+    conn: TCPConnection,
+    buf: DynamicBuffer,
+  ): Promise<Buffer | "END"> {
+    while (buf.indexOf(CRLF2) < 0) {
       const data = await conn.read()
       if (data == "END") {
         if (buf.size() == 0) return "END"
@@ -70,20 +87,8 @@ export class HTTPRequest {
       }
 
       buf.push(data)
-      requestHeaders = HTTPRequest.readRequestHeaders(buf)
     }
-
-    const [requestLine, ...headerLines] = requestHeaders.trimEnd().split(CRLF)
-    const [method, uri, version] = requestLine.split(" ").map((s) => s.trim())
-    const headers = headerLines.map((s) => s.trim()).map(HTTPHeader.parse)
-
-    const bodyReader = HTTPRequest.readRequestBody(conn, buf, headers)
-    return new HTTPRequest(method, uri, version, headers, bodyReader)
-  }
-
-  private static readRequestHeaders(buf: DynamicBuffer): string | null {
-    const idx = buf.indexOf(CRLF2)
-    return idx > 0 ? buf.popString(idx + CRLF2.length) : null
+    return buf.pop(buf.indexOf(CRLF2) + CRLF2.length)
   }
 
   private static readRequestBody(
@@ -128,13 +133,6 @@ export class HTTPRequest {
     }
   }
 
-  private static findHeader(
-    headers: HTTPHeader[],
-    name: string,
-  ): string | null {
-    return headers.find((h) => h.name.toLowerCase() == name)?.value ?? null
-  }
-
   private static parseContentLength(headers: HTTPHeader[]): number {
     const length = HTTPRequest.findHeader(headers, "content-length")
     return length ? parseInt(length) : -1
@@ -143,6 +141,18 @@ export class HTTPRequest {
   private static parseTransferEncoding(headers: HTTPHeader[]): string[] {
     const encoding = HTTPRequest.findHeader(headers, "transfer-encoding")
     return encoding?.split(",")?.map((v) => v.trim().toLowerCase()) ?? []
+  }
+
+  private static findHeader(
+    headers: HTTPHeader[],
+    name: string,
+  ): string | undefined {
+    return headers.find((h) => HTTPRequest.equalsIgnoreCase(h.name, name))
+      ?.value
+  }
+
+  private static equalsIgnoreCase(a: string, b: string): boolean {
+    return a.localeCompare(b, undefined, { sensitivity: "accent" }) == 0
   }
 }
 
@@ -161,7 +171,7 @@ export class HTTPResponse {
       error.code,
       error.message,
       [new HTTPHeader("Content-Length", "0")],
-      { length: 0, read: async () => "EOF" },
+      { length: 0, read: () => Promise.resolve("EOF") },
     )
   }
 
@@ -187,8 +197,8 @@ export class HTTPResponse {
       throw new HTTPError(501, "TODO: chunked encoding")
     }
 
-    await conn.write(Buffer.from(this.#encodeStatusHeaders()))
-    while (true) {
+    await conn.write(Buffer.from(this.encodeStatusHeaders()))
+    for (;;) {
       const data = await this.bodyReader.read()
       if (data == "EOF") break
 
@@ -196,15 +206,15 @@ export class HTTPResponse {
     }
   }
 
-  #encodeStatusHeaders(): string {
-    return this.#encodeStatus() + CRLF + this.#encodeHeaders() + CRLF2
+  private encodeStatusHeaders(): string {
+    return this.encodeStatus() + CRLF + this.encodeHeaders() + CRLF2
   }
 
-  #encodeStatus(): string {
+  private encodeStatus(): string {
     return `${this.version} ${this.code} ${this.reason}`
   }
 
-  #encodeHeaders(): string {
+  private encodeHeaders(): string {
     return this.headers.map((h) => h.toString()).join(CRLF)
   }
 }
@@ -230,8 +240,9 @@ async function handleHTTPConnection(
   conn: TCPConnection,
   requestHandler: (req: HTTPRequest) => Promise<HTTPResponse>,
 ) {
-  while (true) {
-    const req = await HTTPRequest.read(conn)
+  const buf = new DynamicBuffer()
+  for (;;) {
+    const req = await HTTPRequest.read(conn, buf)
     if (req == "END") return
 
     const res = await requestHandler(req)

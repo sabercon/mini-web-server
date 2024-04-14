@@ -11,11 +11,11 @@ async function echo(conn: TCPConnection) {
   await serveHTTP(conn, echoRequest)
 }
 
-async function echoRequest(req: HTTPRequest): Promise<HTTPResponse> {
+function echoRequest(req: HTTPRequest): Promise<HTTPResponse> {
   const bodyReader =
     req.uri == "/echo"
       ? req.bodyReader
-      : bufferReader(Buffer.from("Hello, World!"))
+      : bufferReader(Buffer.from("Hello World!"))
 
-  return HTTPResponse.ok(req.version, [], bodyReader)
+  return Promise.resolve(HTTPResponse.ok(req.version, [], bodyReader))
 }

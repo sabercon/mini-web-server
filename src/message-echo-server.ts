@@ -18,32 +18,29 @@ export default function startEchoServer(options: net.ListenOptions) {
 
 async function echo(conn: TCPConnection) {
   const buf = new DynamicBuffer()
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const msg = cutMessage(buf)
+  for (;;) {
+    const msg = await cutMessage(conn, buf)
+    if (msg == "END") return
 
-    if (msg == null) {
-      const data = await conn.read()
-      if (data == "END") {
-        console.log("EOF")
-        return
-      }
-      buf.push(data)
-      continue
-    }
-
-    if (msg == "quit\n") {
-      const reply = Buffer.from("Bye.\n")
-      await conn.write(reply)
+    if (msg.equals(Buffer.from("quit\n"))) {
+      console.log("closing")
+      await conn.write(Buffer.from("Bye.\n"))
       return
     }
 
-    const reply = Buffer.from(`Echo: ${msg}`)
-    await conn.write(reply)
+    await conn.write(Buffer.from(`Echo: ${msg.toString()}`))
   }
 }
 
-function cutMessage(buffer: DynamicBuffer): string | null {
-  const msgEnd = buffer.indexOf("\n")
-  return msgEnd < 0 ? null : buffer.popString(msgEnd + 1)
+async function cutMessage(
+  conn: TCPConnection,
+  buf: DynamicBuffer,
+): Promise<Buffer | "END"> {
+  while (buf.indexOf("\n") < 0) {
+    const data = await conn.read()
+    if (data == "END") return "END"
+
+    buf.push(data)
+  }
+  return buf.pop(buf.indexOf("\n") + 1)
 }

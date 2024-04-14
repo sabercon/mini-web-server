@@ -29,6 +29,7 @@ export default class TCPConnection {
         return
       }
       if (this.ended) {
+        console.log("END")
         resolve("END")
         return
       }
@@ -60,6 +61,7 @@ export default class TCPConnection {
   private onEnd() {
     this.ended = true
     if (this.reader) {
+      console.log("END")
       this.reader.resolve("END")
       this.reader = null
     }
