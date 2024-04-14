@@ -62,12 +62,14 @@ export class HTTPRequest {
     conn: TCPConnection,
     buf: DynamicBuffer,
   ): Promise<HTTPRequest | "END"> {
-    const lines = await HTTPRequest.cutRequestHeaders(conn, buf)
-    if (lines == "END") return "END"
+    const requestHeaders = await HTTPRequest.cutRequestHeaders(conn, buf)
+    if (requestHeaders == "END") return "END"
 
-    const [requestLine, ...headerLines] = lines.toString().trimEnd().split(CRLF)
-    console.log(requestLine)
-    console.log(headerLines)
+    console.log(requestHeaders.toString())
+    const [requestLine, ...headerLines] = requestHeaders
+      .toString()
+      .trimEnd()
+      .split(CRLF)
     const [method, uri, version] = requestLine.split(" ").map((s) => s.trim())
     const headers = headerLines.map((header) => HTTPHeader.parse(header))
 
@@ -120,12 +122,14 @@ export class HTTPRequest {
       read: async () => {
         if (remaining == 0) return "EOF"
 
-        const data = await conn.read()
-        if (data == "END") {
-          throw new HTTPError(400, "Unexpected EOF")
-        }
+        if (buf.size() == 0) {
+          const data = await conn.read()
+          if (data == "END") {
+            throw new HTTPError(400, "Unexpected EOF")
+          }
 
-        buf.push(data)
+          buf.push(data)
+        }
         const toRead = Math.min(remaining, buf.size())
         remaining -= toRead
         return buf.pop(toRead)
