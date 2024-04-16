@@ -36,7 +36,9 @@ export interface BodyReader {
   read: () => Promise<Buffer | "EOF">
 }
 
-export function bufferReader(data: Buffer): BodyReader {
+export type BufferGenerator = AsyncGenerator<Buffer, void, void>
+
+function bufferReader(data: Buffer): BodyReader {
   let done = false
   return {
     length: data.length,
@@ -45,6 +47,16 @@ export function bufferReader(data: Buffer): BodyReader {
 
       done = true
       return Promise.resolve(data)
+    },
+  }
+}
+
+function bufferGeneratorReader(gen: BufferGenerator): BodyReader {
+  return {
+    length: -1,
+    read: async () => {
+      const result = await gen.next()
+      return result.done ? "EOF" : result.value
     },
   }
 }
@@ -73,7 +85,7 @@ export class HTTPRequest {
     const [method, uri, version] = requestLine.split(" ").map((s) => s.trim())
     const headers = headerLines.map((header) => HTTPHeader.parse(header))
 
-    const bodyReader = HTTPRequest.readRequestBody(conn, buf, headers)
+    const bodyReader = HTTPRequest.requestBodyReader(conn, buf, method, headers)
     return new HTTPRequest(method, uri, version, headers, bodyReader)
   }
 
@@ -93,9 +105,10 @@ export class HTTPRequest {
     return buf.pop(buf.indexOf(CRLF2) + CRLF2.length)
   }
 
-  private static readRequestBody(
+  private static requestBodyReader(
     conn: TCPConnection,
     buf: DynamicBuffer,
+    method: string,
     headers: HTTPHeader[],
   ): BodyReader {
     const length = HTTPRequest.parseContentLength(headers)
@@ -103,15 +116,18 @@ export class HTTPRequest {
     const chunked = encodings.includes("chunked")
 
     if (length >= 0) {
-      return HTTPRequest.readRequestBodyByLength(conn, buf, length)
+      return HTTPRequest.bodyReaderByLength(conn, buf, length)
     } else if (chunked) {
-      throw new HTTPError(501, "TODO: chunked encoding")
+      return HTTPRequest.bodyReaderByChunk(conn, buf)
+    } else if (method == "GET" || method == "HEAD") {
+      return bufferReader(Buffer.alloc(0))
     } else {
+      // for compatibility with HTTP/1.0 clients
       throw new HTTPError(501, "TODO: to read the rest of the connection")
     }
   }
 
-  private static readRequestBodyByLength(
+  private static bodyReaderByLength(
     conn: TCPConnection,
     buf: DynamicBuffer,
     length: number,
@@ -134,6 +150,56 @@ export class HTTPRequest {
         remaining -= toRead
         return buf.pop(toRead)
       },
+    }
+  }
+
+  private static bodyReaderByChunk(
+    conn: TCPConnection,
+    buf: DynamicBuffer,
+  ): BodyReader {
+    return bufferGeneratorReader(HTTPRequest.chunkGenerator(conn, buf))
+  }
+
+  private static async *chunkGenerator(
+    conn: TCPConnection,
+    buf: DynamicBuffer,
+  ): BufferGenerator {
+    async function readChunkSize(): Promise<number> {
+      while (buf.indexOf(CRLF) < 0) {
+        const data = await conn.read()
+        if (data == "END") {
+          throw new HTTPError(400, "Unexpected EOF")
+        }
+
+        buf.push(data)
+      }
+      const num = buf.pop(buf.indexOf(CRLF)).toString()
+      buf.pop(CRLF.length)
+      return parseInt(num, 16)
+    }
+
+    for (;;) {
+      const size = await readChunkSize()
+      if (size == 0) {
+        buf.pop(CRLF.length)
+        return
+      }
+
+      let remaining = size
+      while (remaining > 0) {
+        if (buf.size() == 0) {
+          const data = await conn.read()
+          if (data == "END") {
+            throw new HTTPError(400, "Unexpected EOF")
+          }
+
+          buf.push(data)
+        }
+        const toRead = Math.min(remaining, buf.size())
+        remaining -= toRead
+        yield buf.pop(toRead)
+      }
+      buf.pop(CRLF.length)
     }
   }
 
@@ -170,43 +236,60 @@ export class HTTPResponse {
   ) {}
 
   static error(version: string, error: HTTPError): HTTPResponse {
-    return new HTTPResponse(
+    return HTTPResponse.of(
       version,
       error.code,
       error.message,
-      [new HTTPHeader("Content-Length", "0")],
-      { length: 0, read: () => Promise.resolve("EOF") },
+      [],
+      Buffer.alloc(0),
     )
   }
 
   static ok(
     version: string,
     headers: HTTPHeader[],
-    data: Buffer | BodyReader,
+    data: BodyReader | Buffer | BufferGenerator,
   ): HTTPResponse {
+    return HTTPResponse.of(version, 200, "OK", headers, data)
+  }
+
+  static of(
+    version: string,
+    code: number,
+    reason: string,
+    headers: HTTPHeader[],
+    data: BodyReader | Buffer | BufferGenerator,
+  ): HTTPResponse {
+    let reader: BodyReader
     if (data instanceof Buffer) {
-      data = bufferReader(data)
+      reader = bufferReader(data)
+    } else if (Symbol.asyncIterator in data) {
+      reader = bufferGeneratorReader(data)
+    } else {
+      reader = data
     }
+
+    const extraHeader =
+      reader.length >= 0
+        ? new HTTPHeader("Content-Length", reader.length.toString())
+        : new HTTPHeader("Transfer-Encoding", "chunked")
+
     return new HTTPResponse(
       version,
-      200,
-      "OK",
-      [...headers, new HTTPHeader("Content-Length", data.length.toString())],
-      data,
+      code,
+      reason,
+      [...headers, extraHeader],
+      reader,
     )
   }
 
-  async write(conn: TCPConnection): Promise<void> {
-    if (this.bodyReader.length < 0) {
-      throw new HTTPError(501, "TODO: chunked encoding")
-    }
-
+  async write(conn: TCPConnection) {
     await conn.write(Buffer.from(this.encodeStatusHeaders()))
-    for (;;) {
-      const data = await this.bodyReader.read()
-      if (data == "EOF") break
 
-      await conn.write(data)
+    if (this.bodyReader.length < 0) {
+      await this.writeChunkedBody(conn)
+    } else {
+      await this.writeNonChunkedBody(conn)
     }
   }
 
@@ -220,6 +303,29 @@ export class HTTPResponse {
 
   private encodeHeaders(): string {
     return this.headers.map((h) => h.toString()).join(CRLF)
+  }
+
+  private async writeChunkedBody(conn: TCPConnection) {
+    for (;;) {
+      const data = await this.bodyReader.read()
+      if (data == "EOF") {
+        await conn.write(Buffer.from("0" + CRLF2))
+        break
+      }
+      const chunk = Buffer.from(
+        data.length.toString(16) + CRLF + data.toString() + CRLF,
+      )
+      await conn.write(chunk)
+    }
+  }
+
+  private async writeNonChunkedBody(conn: TCPConnection) {
+    for (;;) {
+      const data = await this.bodyReader.read()
+      if (data == "EOF") break
+
+      await conn.write(data)
+    }
   }
 }
 
