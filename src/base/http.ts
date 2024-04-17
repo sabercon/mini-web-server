@@ -1,3 +1,4 @@
+import * as fs from "fs/promises"
 import TCPConnection from "./tcp-connection"
 import DynamicBuffer from "./dynamic-buffer"
 
@@ -32,13 +33,13 @@ export class HTTPHeader {
 export interface BodyReader {
   // the "Content-Length", -1 if unknown.
   length: number
-  // to read data
   read: () => Promise<Buffer | "EOF">
+  close?: () => Promise<void>
 }
 
 export type BufferGenerator = AsyncGenerator<Buffer, void, void>
 
-function bufferReader(data: Buffer): BodyReader {
+export function bufferReader(data: Buffer): BodyReader {
   let done = false
   return {
     length: data.length,
@@ -51,13 +52,64 @@ function bufferReader(data: Buffer): BodyReader {
   }
 }
 
-function bufferGeneratorReader(gen: BufferGenerator): BodyReader {
+export function bufferGeneratorReader(gen: BufferGenerator): BodyReader {
   return {
     length: -1,
     read: async () => {
       const result = await gen.next()
       return result.done ? "EOF" : result.value
     },
+    close: async () => {
+      await gen.return()
+    },
+  }
+}
+
+export async function staticFileReader(path: string): Promise<BodyReader> {
+  const [fp, size] = await openFile(path)
+  let read = 0
+  return {
+    length: size,
+    read: async () => {
+      const result = await fp.read()
+      if (result.bytesRead == 0) {
+        if (read == size) return "EOF"
+        throw new HTTPError(500, "File Size Changed")
+      }
+
+      read += result.bytesRead
+      if (read > size) {
+        // cannot continue since we have sent the `Content-Length`.
+        throw new HTTPError(500, "File Size Changed")
+      }
+      // NOTE: the automatically allocated buffer may be larger
+      return result.buffer.subarray(0, result.bytesRead)
+    },
+    close: async () => await fp.close(),
+  }
+}
+
+async function openFile(path: string): Promise<[fs.FileHandle, number]> {
+  let fp: fs.FileHandle
+  try {
+    fp = await fs.open(path, "r")
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code == "ENOENT") {
+      throw new HTTPError(404, "Not Found")
+    }
+    throw error
+  }
+
+  try {
+    const stat = await fp.stat()
+    if (!stat.isFile()) {
+      throw new HTTPError(404, "Not Found")
+    }
+
+    return [fp, stat.size]
+  } catch (error) {
+    await fp.close()
+    throw error
   }
 }
 
@@ -286,10 +338,14 @@ export class HTTPResponse {
   async write(conn: TCPConnection) {
     await conn.write(Buffer.from(this.encodeStatusHeaders()))
 
-    if (this.bodyReader.length < 0) {
-      await this.writeChunkedBody(conn)
-    } else {
-      await this.writeNonChunkedBody(conn)
+    try {
+      if (this.bodyReader.length < 0) {
+        await this.writeChunkedBody(conn)
+      } else {
+        await this.writeNonChunkedBody(conn)
+      }
+    } finally {
+      await this.bodyReader.close?.()
     }
   }
 

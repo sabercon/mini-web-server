@@ -7,6 +7,7 @@ import {
   HTTPRequest,
   HTTPResponse,
   serveHTTP,
+  staticFileReader,
 } from "./base/http"
 
 export default function startHTTPServer(options: net.ListenOptions) {
@@ -28,6 +29,11 @@ async function handleHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
       break
     default:
       reader = Buffer.from("Hello World!")
+  }
+  if (req.uri.startsWith("/files/")) {
+    // serves files from the current working directory
+    // FIXME: prevent escaping by `..`
+    reader = await staticFileReader(req.uri.substring("/files/".length))
   }
 
   return Promise.resolve(HTTPResponse.ok(req.version, [], reader))
