@@ -1,4 +1,4 @@
-import * as net from "net"
+import net from "net"
 import TCPConnection from "./tcp-connection"
 
 export default function startTCPServer(
@@ -20,8 +20,8 @@ async function handleConnection(
   try {
     const conn = new TCPConnection(socket)
     await connHandler(conn)
-  } catch (err) {
-    console.error(err)
+  } catch (error) {
+    console.error(error)
   } finally {
     socket.destroy()
   }

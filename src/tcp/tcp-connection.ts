@@ -1,4 +1,4 @@
-import * as net from "net"
+import net from "net"
 
 export default class TCPConnection {
   // from the 'error' event

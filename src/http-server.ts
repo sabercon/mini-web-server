@@ -1,14 +1,11 @@
-import * as net from "net"
-import TCPConnection from "./base/tcp-connection"
-import startTCPServer from "./base/tcp-server"
-import {
-  BodyReader,
-  BufferGenerator,
-  HTTPRequest,
-  HTTPResponse,
-  serveHTTP,
-  staticFileReader,
-} from "./base/http"
+import net from "net"
+import fs from "fs/promises"
+import ContentReader from "./base/content-reader"
+import TCPConnection from "./tcp/tcp-connection"
+import startTCPServer from "./tcp/tcp-server"
+import { HTTPError, serveHTTP } from "./http/common"
+import HTTPRequest from "./http/http-request"
+import HTTPResponse from "./http/http-response"
 
 export default function startHTTPServer(options: net.ListenOptions) {
   startTCPServer(options, handleHTTPConnection)
@@ -19,27 +16,30 @@ async function handleHTTPConnection(conn: TCPConnection) {
 }
 
 async function handleHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
-  let reader: BodyReader | Buffer | BufferGenerator
-  switch (req.uri) {
-    case "/echo":
-      reader = req.bodyReader
-      break
-    case "/sheep":
-      reader = sheepCounter()
-      break
-    default:
-      reader = Buffer.from("Hello World!")
-  }
-  if (req.uri.startsWith("/files/")) {
+  const { method, uri } = req.head
+  let reader: ContentReader
+  if (["POST", "PUT"].includes(method) && uri == "/echo") {
+    reader = req.body
+  } else if (method == "GET" && uri == "/sheep") {
+    reader = ContentReader.fromGenerator(sheepCounter())
+  } else if (["HEAD", "GET"].includes(method) && uri.startsWith("/files/")) {
     // serves files from the current working directory
     // FIXME: prevent escaping by `..`
-    reader = await staticFileReader(req.uri.substring("/files/".length))
+    const path = uri.substring("/files/".length)
+    const f = await openFile(path)
+    if (f == null) {
+      throw new HTTPError(404, "Not Found")
+    }
+
+    reader = ContentReader.fromFile(...f)
+  } else {
+    reader = ContentReader.fromBuffer(Buffer.from("Hello World!"))
   }
 
-  return Promise.resolve(HTTPResponse.ok(req.version, [], reader))
+  return HTTPResponse.ok(req.head, [], reader)
 }
 
-async function* sheepCounter(): BufferGenerator {
+async function* sheepCounter(): AsyncGenerator<Buffer, void, void> {
   function sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }
@@ -47,5 +47,29 @@ async function* sheepCounter(): BufferGenerator {
   for (let i = 0; i < 100; i++) {
     await sleep(1000)
     yield Buffer.from(`${i}\n`)
+  }
+}
+
+async function openFile(path: string): Promise<[fs.FileHandle, number] | null> {
+  let fp: fs.FileHandle
+  try {
+    fp = await fs.open(path, "r")
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code == "ENOENT") {
+      return null
+    }
+    throw error
+  }
+
+  try {
+    const stat = await fp.stat()
+    if (!stat.isFile()) {
+      return null
+    }
+
+    return [fp, stat.size]
+  } catch (error) {
+    await fp.close()
+    throw error
   }
 }

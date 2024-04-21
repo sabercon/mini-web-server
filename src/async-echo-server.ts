@@ -1,11 +1,11 @@
-import * as net from "net"
-import TCPConnection from "./base/tcp-connection"
-import startTCPServer from "./base/tcp-server"
+import net from "net"
+import TCPConnection from "./tcp/tcp-connection"
+import startTCPServer from "./tcp/tcp-server"
 
 /**
  * Starts a TCP server that reads data from clients and writes the same data back.
  */
-export default function startEchoServer(options: net.ListenOptions) {
+export default function startAsyncEchoServer(options: net.ListenOptions) {
   startTCPServer(options, echo)
 }
 

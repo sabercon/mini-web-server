@@ -1,7 +1,7 @@
-import * as net from "net"
-import TCPConnection from "./base/tcp-connection"
-import startTCPServer from "./base/tcp-server"
+import net from "net"
 import DynamicBuffer from "./base/dynamic-buffer"
+import TCPConnection from "./tcp/tcp-connection"
+import startTCPServer from "./tcp/tcp-server"
 
 /**
  * Starts a TCP server using a simple protocol.
@@ -12,7 +12,7 @@ import DynamicBuffer from "./base/dynamic-buffer"
  * - If the client sends 'quit', reply with 'Bye.' and close the connection.
  * - Otherwise, echo the message back with the prefix 'Echo: '.
  */
-export default function startEchoServer(options: net.ListenOptions) {
+export default function startMessageEchoServer(options: net.ListenOptions) {
   startTCPServer(options, echo)
 }
 
@@ -23,7 +23,6 @@ async function echo(conn: TCPConnection) {
     if (msg == "END") return
 
     if (msg.equals(Buffer.from("quit\n"))) {
-      console.log("closing")
       await conn.write(Buffer.from("Bye.\n"))
       return
     }

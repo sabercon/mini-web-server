@@ -1,9 +1,9 @@
-import * as net from "net"
+import net from "net"
 
 /**
  * Starts a TCP server that reads data from clients and writes the same data back.
  */
-export default function startEchoServer(options: net.ListenOptions) {
+export default function startCallbackEchoServer(options: net.ListenOptions) {
   const server = net.createServer()
   server.on("error", handleError)
   server.on("connection", handleConnection)
@@ -28,7 +28,7 @@ function handleConnection(socket: net.Socket) {
     socket.write(data)
 
     if (data.includes("q")) {
-      console.log("closing")
+      console.log("BYE")
       socket.end()
     }
   })
