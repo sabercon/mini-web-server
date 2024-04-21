@@ -90,8 +90,10 @@ export default class HTTPResponse {
         await conn.write(Buffer.from("0" + CRLF2))
         break
       }
-      const chunk = data.length.toString(16) + CRLF + data.toString() + CRLF
-      await conn.write(Buffer.from(chunk))
+
+      const size = Buffer.from(data.length.toString(16))
+      const crlf = Buffer.from(CRLF)
+      await conn.write(Buffer.concat([size, crlf, data, crlf]))
     }
   }
 

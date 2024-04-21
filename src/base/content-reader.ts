@@ -1,4 +1,7 @@
 import fs from "fs/promises"
+import zlib from "node:zlib"
+import stream from "stream"
+import { pipeline } from "stream/promises"
 
 export default class ContentReader {
   constructor(
@@ -6,6 +9,36 @@ export default class ContentReader {
     public readonly read: () => Promise<Buffer | "EOF">,
     public readonly close?: () => Promise<void>,
   ) {}
+
+  toStream(): stream.Readable {
+    const self = new stream.Readable({
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      read: async () => {
+        try {
+          const data = await this.read()
+          self.push(data == "EOF" ? null : data)
+        } catch (error) {
+          self.destroy(error as Error)
+        }
+      },
+    })
+    return self
+  }
+
+  withGzip(): ContentReader {
+    const gzip = zlib.createGzip()
+    pipeline(this.toStream(), gzip).catch((e: Error) => gzip.destroy(e)) // no await
+
+    const iter = gzip.iterator()
+    return new ContentReader(
+      null,
+      async () => {
+        const result = await iter.next()
+        return result.done ? "EOF" : (result.value as Buffer)
+      },
+      this.close,
+    )
+  }
 
   static empty(): ContentReader {
     return new ContentReader(0, () => Promise.resolve("EOF"))
